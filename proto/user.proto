@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package User;
+message UserInfo
+{
+	int32 uid = 1;
+	int32 age = 2;
+	string name = 3;
+	enum Job {
+		TEACHER = 0;
+		DOCTOR = 1;
+		POLICE = 2;
+	}
+	Job job = 4;
+}

@@ -1,0 +1,14 @@
+#ifndef NOTICE_H
+#define NOTICE_H
+
+enum errno_t
+{
+    ERR_PORT_OR_IP = 100,
+    ERR_SOCKET_FAILED = 101,
+    ERR_SOCKOPT_FAILED = 102,
+    ERR_BIND_FAILED = 103,
+    ERR_LISTEN_FAILED = 104,
+    ERR_CONNECT_FAILED = 105,
+};
+
+#endif // NOTICE_H

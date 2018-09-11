@@ -2,6 +2,7 @@
 #define SOCKET_H
 #include <iostream>
 #include <string.h>
+#include <map>
 
 class Socket
 {
@@ -14,6 +15,7 @@ public:
     virtual ~Socket();
     int Init();
     virtual void Run() = 0;
+
 private:
     int InitSockFd();
     void Reset();
@@ -21,14 +23,33 @@ protected:
     virtual int DoInit() = 0;
 };
 
+class ServSocket;
+struct pthread_args_t
+{
+    int new_fd = -1;
+    ServSocket* p_serv = nullptr;
+};
 
 class ServSocket : public Socket
 {
 private:
     int m_backlog = 10;
+
+public:
+    struct clnt_info_t
+    {
+        int count = 0;
+        std::string ip_addr = "";
+    };
+
+    using clnt_addr_map_t = std::map<int, clnt_info_t>;
+    clnt_addr_map_t m_clnt_map;
+
 public:
     ServSocket(int port, const std::string& ip, int backlog = 10);
     void Run() override;
+    void ResetTickCount(int fd);
+
 private:
     int DoInit() override;
 };

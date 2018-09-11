@@ -3,12 +3,15 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <sstream>
 
-#include "socket.h"
-#include "notice.h"
+#include "include/socket.h"
+#include "include/notice.h"
 #include "proto/user.pb.h"
+#include "include/data_def.h"
+#include "include/bytebuffer.h"
 
-constexpr unsigned int MAX_BUF_SIZE = 128;
+constexpr unsigned int MAX_BUF_SIZE = 1024;
 
 Socket::Socket(int port, const std::string &ip)
     : m_port(port)
@@ -93,8 +96,109 @@ int ServSocket::DoInit()
     return 0;
 }
 
+void* HeartHandler(void* args)
+{
+    ServSocket* p_serv = (ServSocket*)args;
+    if (!p_serv)
+        return nullptr;
+    std::cout << "Start Heart Handler!!!!!\n";
+    while (true) {
+        for (auto iter = p_serv->m_clnt_map.begin(); iter != p_serv->m_clnt_map.end();)
+        {
+            int& cur_count = iter->second.count;
+            if (cur_count >= 5)
+            {
+                  std::cout << "Client [" <<iter->second.ip_addr << ": " <<iter->first <<" ], Heartbeat Failed\n";
+                  close(iter->first);
+                  p_serv->m_clnt_map.erase(iter++);
+            }
+            else if (cur_count >=0 && cur_count < 5)
+            {
+                cur_count++;
+                ++iter;
+            }
+            else
+            {
+                std::cout << "Client [" <<iter->second.ip_addr << ": " <<iter->first <<" ], Count Error\n";
+                close(iter->first);
+                p_serv->m_clnt_map.erase(iter++);
+            }
+        }
+        sleep(2);
+    }
+}
+
+void* RecvHandler(void* args)
+{
+    pthread_args_t* pthread_args = (pthread_args_t*) args;
+    if (!pthread_args)
+        return nullptr;
+
+    while(true)
+    {
+        int recv_size = 0;
+        char buf[MAX_BUF_SIZE];
+        memset(buf, 0, MAX_BUF_SIZE);
+        recv_size = recv(pthread_args->new_fd, buf, MAX_BUF_SIZE, 0);
+
+        if (recv_size < 0)
+        {
+            std::cout << "Recv Failed\n";
+            exit(-1);
+        }
+        else if (0 == recv_size)
+        {
+            std::cout << "Recv Finished\n";
+            close(pthread_args->new_fd);
+            pthread_exit(NULL);
+        }
+        else
+        {
+            int8_t type = static_cast<int8_t>(buf[0]);
+            uint32_t length = 0;
+            memcpy(&length, buf + 1, sizeof(uint32_t));
+            std::cout << "Type: " << +type << ", Lenght: " << length << std::endl;
+            if (TYPE_TICK == type)
+            {
+                pthread_args->p_serv->ResetTickCount(pthread_args->new_fd);
+            }
+            else if (TYPE_COMMON == type)
+            {
+                std::string recv_data(buf + 1 + sizeof(uint32_t),  length);
+                std::cout <<"Recf Size:" << recv_size <<  ", Clinett Msg: " << recv_data << std::endl;
+                if ("GET" == recv_data)
+                {
+                    std::cout << "Correct operator\n";
+                    User::UserInfo user;
+                    user.set_uid(9999);
+                    user.set_age(18);
+                    user.set_name("Lucifer");
+                    user.set_job(User::UserInfo_Job_TEACHER);
+
+                    std::string send_data;
+                    user.SerializeToString(&send_data);
+                    send(pthread_args->new_fd, send_data.c_str(), send_data.length(), 0);
+                }
+                else
+                {
+                    std::cout << "Not Correct operator\n";
+                    std::string send_data("Not correct operator\n");
+                    send(pthread_args->new_fd, send_data.c_str(), send_data.length(), 0);
+                }
+            }
+        }
+    }
+}
+
 void ServSocket::Run()
 {
+    pthread_t pd = -1;
+    int ret = pthread_create(&pd, NULL, HeartHandler, (void*)this);
+    if (ret !=0)
+    {
+        std::cout << "Pthread Create HeartHandler Failed!\n";
+        exit(-1);
+    }
     struct sockaddr_in clnt_addr;
     while (true) {
        std::cout << "Watting Client: \n";
@@ -104,33 +208,29 @@ void ServSocket::Run()
        if (clnt_fd < 0)
            continue;
 
-       int recv_size = 0;
-       char buf[MAX_BUF_SIZE];
-       memset(buf, 0, MAX_BUF_SIZE);
-       recv_size = recv(clnt_fd, buf, MAX_BUF_SIZE, 0);
-       std::string recv_data(buf, recv_size);
-       std::cout << "From Client: " << inet_ntoa(clnt_addr.sin_addr) << std::endl;
-       std::cout << "Clinett Msg: " << recv_data << std::endl;
-       if ("GET" == recv_data)
+       std::cout << "From Client: [" << inet_ntoa(clnt_addr.sin_addr) << "], fd: ["<< clnt_fd << "]"<< std::endl;
+       pd = -1;
+       pthread_args_t args;
+       args.new_fd = clnt_fd;
+       args.p_serv = this;
+       ret = pthread_create(&pd, NULL, RecvHandler, (void*)&args);
+       if (ret != 0)
        {
-           std::cout << "Correct operator\n";
-           User::UserInfo user;
-           user.set_uid(9999);
-           user.set_age(18);
-           user.set_name("Lucifer");
-           user.set_job(User::UserInfo_Job_TEACHER);
+           std::cout << "Pthread Create RecvHandler Failed!\n";
+           exit(-1);
+       }
+       clnt_info_t clnt_info;
+       clnt_info.ip_addr = inet_ntoa(clnt_addr.sin_addr);
+       m_clnt_map.insert(std::make_pair(clnt_fd, clnt_info));
+    }
+}
 
-           std::string send_data;
-           user.SerializeToString(&send_data);
-           send(clnt_fd, send_data.c_str(), send_data.length(), 0);
-       }
-       else
-       {
-           std::cout << "Not Correct operator\n";
-           std::string send_data("Not correct operator\n");
-           send(clnt_fd, send_data.c_str(), send_data.length(), 0);
-       }
-       close(clnt_fd);
+void ServSocket::ResetTickCount(int fd)
+{
+    auto iter = m_clnt_map.find(fd);
+    if (iter != m_clnt_map.end())
+    {
+        iter->second.count = 0;
     }
 }
 
@@ -143,7 +243,12 @@ ClntSocket::ClntSocket(int port, const std::string &ip)
 
 void ClntSocket::Run()
 {
-    std::string send_data("GET");
+    int8_t type = TYPE_COMMON;
+    std::string get_str("GET");
+    uint32_t length = get_str.length();
+    ByteBuffer tmp_buff;
+    tmp_buff << type << length << get_str.c_str();
+    std::string send_data(tmp_buff.contents(), tmp_buff.size());
     int send_bytes = send(m_sockfd, send_data.c_str(), send_data.length(), 0);
     if (send_bytes != send_data.length())
     {

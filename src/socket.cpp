@@ -161,6 +161,7 @@ void* RecvHandler(void* args)
             if (TYPE_TICK == type)
             {
                 pthread_args->p_serv->ResetTickCount(pthread_args->new_fd);
+                std::cout << "Recv Client Heart";
             }
             else if (TYPE_COMMON == type)
             {
@@ -241,8 +242,38 @@ ClntSocket::ClntSocket(int port, const std::string &ip)
 
 }
 
+void* SendHeart(void* args)
+{
+    std::cout << "The heartbeat sending thread started.\n";
+    int fd = *((int*)args);
+    int count = 0;
+    while (true) {
+        int8_t type = TYPE_TICK;
+        uint32_t length = 0;
+        ByteBuffer tmp_buff;
+        tmp_buff << type << length;
+        std::string send_data(tmp_buff.contents(), tmp_buff.size());
+        send(fd, send_data.c_str(), send_data.length(), 0);
+        sleep(2);
+        ++count;
+        if (count > 20)
+        {
+            std::cout << "HeartBeat Count Finished!\n";
+            break;
+        }
+    }
+}
+
 void ClntSocket::Run()
 {
+    pthread_t id;
+    int ret = pthread_create(&id, NULL, SendHeart, (void*)&m_sockfd);
+    if(ret != 0)
+    {
+        std::cout << "Can not create thread!";
+        exit(1);
+    }
+
     int8_t type = TYPE_COMMON;
     std::string get_str("GET");
     uint32_t length = get_str.length();

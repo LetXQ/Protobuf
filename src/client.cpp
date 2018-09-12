@@ -29,5 +29,9 @@ int main(int argc, char* argv[])
     }
     obj.Run();
 
+    while(1)
+    {
+
+    }
     return 0;
 }
